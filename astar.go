@@ -30,18 +30,18 @@ func (g Graph) AStar(source Node, goal Node) (NodePath, error) {
 		delete(openSet, n.Id)
 		closedSet[n.Id] = n
 		for _, l := range n.Neighbours {
-			if _, isOk := closedSet[l.To]; isOk == true {
+			if _, isOk := closedSet[l.To.Id]; isOk == true {
 				continue
 			}
-			if _, isOk := openSet[l.To]; isOk == false {
-				openSet[l.To] = g.Nodes[l.To]
+			if _, isOk := openSet[l.To.Id]; isOk == false {
+				openSet[l.To.Id] = g.Nodes[l.To.Id]
 			}
-			historicNeighbour, isOk := historic[l.To]
+			historicNeighbour, isOk := historic[l.To.Id]
 			tentative_gScore := historic[n.Id].GScore + l.Cost
 			if isOk == false || tentative_gScore >= historicNeighbour.GScore {
 				continue
 			}
-			historic[l.To] = NodePath{Node: g.Nodes[l.To], GScore: tentative_gScore, Parent: n}
+			historic[l.To.Id] = NodePath{Node: g.Nodes[l.To.Id], GScore: tentative_gScore, Parent: n}
 		}
 	}
 	return NodePath{}, errors.New("No Path found")

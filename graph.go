@@ -1,8 +1,26 @@
 package gographer
 
 import (
+	"encoding/json"
+	"errors"
+
 	uuid "github.com/satori/go.uuid"
 )
+
+var (
+	ErrStopIterate     = errors.New("stopping iteration")
+	ErrFinishedIterate = errors.New("iteration finished")
+)
+
+type ErrorStack []error
+
+func (errs ErrorStack) Error() string {
+	res := ""
+	for _, err := range errs {
+		res += err.Error() + "\n"
+	}
+	return res
+}
 
 type Direction string
 
@@ -15,24 +33,25 @@ type Link struct {
 	Id        uuid.UUID   `json:"id"`
 	Direction Direction   `json:"direction"`
 	Cost      float64     `json:"cost"`
-	From      uuid.UUID   `json:"from"`
-	To        uuid.UUID   `json:"to"`
+	From      *Node       `json:"-"`
+	To        *Node       `json:"-"`
 	Value     interface{} `json:"value"`
 }
 
-func MakeLink(direction Direction, cost float64, from, to uuid.UUID, value interface{}) Link {
-	return Link{From: from, To: to, Direction: direction, Cost: cost, Value: value, Id: uuid.NewV5(uuid.Or(from, to), from.String()+to.String())}
+func MakeLink(direction Direction, cost float64, from, to *Node, value interface{}) Link {
+	return Link{From: from, To: to, Direction: direction, Cost: cost, Value: value, Id: uuid.NewV5(uuid.Or(from.Id, to.Id), from.Id.String()+to.Id.String())}
 }
 
-// func (n Node) MarshalJSON() ([]byte, error) {
-// neighboursId := make([]uuid.UUID, 0, len(n.Neighbours))
-// marsahlNode := struct {
-// 	Id           uuid.UUID   `json:"id"`
-// 	NeighboursId []uuid.UUID `json:"neighboursId"`
-// 	Value        interface{} `json:"value"`
-// }{Id: n.Id, NeighboursId: neighboursId, Value: n.Value}
-// return json.Marshal(marsahlNode)
-// }
+func (l Link) MarshalJSON() ([]byte, error) {
+	// type MarshallerLink = Link
+	type MarshallerLink Link
+	marsahlLink := struct {
+		MarshallerLink
+		FromId uuid.UUID `json:"from"`
+		ToId   uuid.UUID `json:"to"`
+	}{MarshallerLink: MarshallerLink(l), FromId: l.From.Id, ToId: l.To.Id}
+	return json.Marshal(marsahlLink)
+}
 
 type Node struct {
 	Id         uuid.UUID          `json:"id"`
@@ -61,22 +80,60 @@ func MakeNodeId(id uuid.UUID, val interface{}) Node {
 	return Node{Id: id, Value: val, Neighbours: map[uuid.UUID]Link{}}
 }
 
-func (n Node) IsLinkedTo(node Node) bool {
-	testLink := func(node1, node2 Node) bool {
-		for _, l := range node1.Neighbours {
-
-			if l.From == node2.Id || l.To == node2.Id {
-
-				return true
+func (n Node) Iterate(depth int, cb func(node Node) error) error {
+	stack := []Node{n}
+	closedList := map[uuid.UUID]Node{n.Id: n}
+	errorsStack := ErrorStack{}
+	for len(stack) > 0 {
+		newNode := stack[0]
+		err := cb(newNode)
+		if err == ErrStopIterate {
+			return err
+		} else if err != nil {
+			errorsStack = append(errorsStack, err)
+		}
+		closedList[newNode.Id] = newNode
+		stack = append(stack[:0], stack[1:]...)
+		if depth > 0 {
+			for _, linked := range newNode.Neighbours {
+				var subNode *Node
+				if linked.From.Id != newNode.Id {
+					subNode = linked.From
+				} else {
+					subNode = linked.To
+				}
+				if _, isOK := closedList[subNode.Id]; isOK == false {
+					stack = append(stack, *subNode)
+				}
 			}
 		}
-		return false
+		depth--
 	}
-	return testLink(n, node) && testLink(node, n)
+	return errorsStack
+}
+
+func (n Node) IsLinkedToDepth(depth int, nodeId uuid.UUID) bool {
+	err := n.Iterate(depth, func(node Node) error {
+		if node.Id == nodeId {
+			return ErrStopIterate
+		}
+		return nil
+	})
+	return err == ErrStopIterate
+}
+
+func (n Node) IsLinkedTo(nodeId uuid.UUID) bool {
+	for _, l := range n.Neighbours {
+		if l.From.Id == nodeId || l.To.Id == nodeId {
+
+			return true
+		}
+	}
+	return false
 }
 
 func (n *Node) AddNeighbour(node *Node, cost float64, direction Direction, value interface{}) {
-	l := MakeLink(direction, cost, n.Id, node.Id, value)
+	l := MakeLink(direction, cost, n, node, value)
 	if _, isOk := n.Neighbours[l.Id]; isOk == false {
 		n.Neighbours[l.Id] = l
 	}
